@@ -51,3 +51,49 @@ SYSCALL_DEFINE0(getpagesize)
 {
         return 4096;
 }
+
+
+#define __stringify_1(x...)     #x
+#define __stringify(x...)       __stringify_1(x)
+
+#define SYSCALL_DEFINEx(x, sname, ...)                          \
+        SYSCALL_METADATA(sname, x, __VA_ARGS__)                 \
+        __SYSCALL_DEFINEx(x, sname, __VA_ARGS__)
+
+#define __PROTECT(...) asmlinkage_protect(__VA_ARGS__)
+#define __SYSCALL_DEFINEx(x, name, ...)                                 \
+        asmlinkage long sys##name(__MAP(x,__SC_DECL,__VA_ARGS__))       \
+                __attribute__((alias(__stringify(SyS##name))));         \
+        static inline long SYSC##name(__MAP(x,__SC_DECL,__VA_ARGS__));  \
+        asmlinkage long SyS##name(__MAP(x,__SC_LONG,__VA_ARGS__));      \
+        asmlinkage long SyS##name(__MAP(x,__SC_LONG,__VA_ARGS__))       \
+        {                                                               \
+                long ret = SYSC##name(__MAP(x,__SC_CAST,__VA_ARGS__));  \
+                __MAP(x,__SC_TEST,__VA_ARGS__);                         \
+                __PROTECT(x, ret,__MAP(x,__SC_ARGS,__VA_ARGS__));       \
+                return ret;                                             \
+        }                                                               \
+        static inline long SYSC##name(__MAP(x,__SC_DECL,__VA_ARGS__))
+
+#define SYSCALL_DEFINE2(name, ...) SYSCALL_DEFINEx(2, _##name, __VA_ARGS__)
+
+SYSCALL_DEFINE2(listen, int, fd, int, backlog)
+{
+        struct socket *sock;
+        int err, fput_needed;
+        int somaxconn;
+
+        sock = sockfd_lookup_light(fd, &err, &fput_needed);
+        if (sock) {
+                somaxconn = sock_net(sock->sk)->core.sysctl_somaxconn;
+                if ((unsigned int)backlog > somaxconn)
+                        backlog = somaxconn;
+
+                err = security_socket_listen(sock, backlog);
+                if (!err)
+                        err = sock->ops->listen(sock, backlog);
+
+                fput_light(sock->file, fput_needed);
+        }
+        return err;
+}
